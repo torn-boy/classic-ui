@@ -14,7 +14,7 @@
       <div v-if="withdrawType === 'relayer'" class="withdraw-data-item">
         {{ $t('gasPrice') }}
 
-        <span>{{ gasPriceInGwei }} Gwei</span>
+        <span>{{ relayerGasPriceInGwei == null ? '—' : relayerGasPriceInGwei + ' Gwei' }}</span>
       </div>
       <div v-if="withdrawType === 'relayer'" class="withdraw-data-item">
         {{ $t('networkFee') }}
@@ -80,7 +80,7 @@ export default {
     ...mapGetters('metamask', {
       networkCurrency: 'currency'
     }),
-    ...mapGetters('fees', ['gasPriceInGwei']),
+    ...mapGetters('fees', ['relayerGasPriceInGwei']),
     ...mapGetters('token', ['toDecimals', 'fromDecimals']),
     ...mapGetters('price', ['tokenRate']),
     poolFee() {

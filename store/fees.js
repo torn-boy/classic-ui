@@ -5,6 +5,7 @@ import { TornadoFeeOracleV4, TornadoFeeOracleV5 } from '@tornado/tornado-oracles
 export const state = () => {
   return {
     gasPriceParams: { gasPrice: toWei(toBN(50), 'gwei') },
+    mainnetRelayerGasPrice: null,
     withdrawalNetworkFee: toBN(0),
     withdrawalFeeViaRelayer: toBN(0)
   }
@@ -20,6 +21,18 @@ export const getters = {
     return netId === 1
       ? new TornadoFeeOracleV4(netId, rpcUrl, gasPrices)
       : new TornadoFeeOracleV5(netId, rpcUrl, gasPrices)
+  },
+  relayerOracle: (state, getters, rootState, rootGetters) => {
+    if (Number(rootGetters['metamask/netId']) !== 1) return getters.oracle
+    const { url } = rootState.settings.netId1.rpc
+    const { gasPrices } = rootGetters['metamask/networkConfig']
+    const oracle = new TornadoFeeOracleV4(1, url, gasPrices)
+    oracle.oracle.eip1559.configuration.minPriority = 0.3 // gwei, mainnet relayed withdrawals only
+    return oracle
+  },
+  relayerGasPriceInGwei: (state, getters, rootState, rootGetters) => {
+    if (Number(rootGetters['metamask/netId']) !== 1) return getters.gasPriceInGwei
+    return state.mainnetRelayerGasPrice && fromWei(state.mainnetRelayerGasPrice, 'gwei')
   },
   getGasPriceParams: (state) => {
     return state.gasPriceParams
@@ -39,6 +52,9 @@ export const mutations = {
   },
   SAVE_WITHDRAWAL_NETWORK_FEE(state, gasFee) {
     state.withdrawalNetworkFee = gasFee
+  },
+  SAVE_MAINNET_RELAYER_GAS_PRICE(state, gasPrice) {
+    state.mainnetRelayerGasPrice = gasPrice
   },
   SAVE_WITHDRAWAL_FEE_VIA_RELAYER(state, fee) {
     state.withdrawalFeeViaRelayer = fee
@@ -62,7 +78,14 @@ export const actions = {
     const { gasPrices } = rootGetters['metamask/networkConfig']
     commit('SAVE_GAS_PARAMS', { gasPrice: toWei(gasPrices?.fast?.toFixed(9) || 0, 'gwei') })
   },
-  async calculateWithdrawalNetworkFee({ getters, commit }, { tx }) {
+  async calculateWithdrawalNetworkFee({ getters, commit, rootGetters }, { tx }) {
+    if (Number(rootGetters['metamask/netId']) === 1) {
+      const { gasPrice, gasLimit } = await getters.relayerOracle.getGasParams(tx, 'user_withdrawal')
+      const price = toBN(gasPrice)
+      commit('SAVE_MAINNET_RELAYER_GAS_PRICE', price)
+      commit('SAVE_WITHDRAWAL_NETWORK_FEE', price.muln(gasLimit))
+      return
+    }
     const withdrawalGas = await getters.oracle.getGas(tx, 'user_withdrawal')
 
     commit('SAVE_WITHDRAWAL_NETWORK_FEE', toBN(withdrawalGas))
@@ -77,7 +100,7 @@ export const actions = {
     if (currency !== nativeCurrency)
       await dispatch('application/setDefaultEthToReceive', { currency }, { root: true })
 
-    const withdrawalFee = await getters.oracle.calculateWithdrawalFeeViaRelayer(
+    const withdrawalFee = await getters.relayerOracle.calculateWithdrawalFeeViaRelayer(
       'user_withdrawal',
       tx,
       feePercent,
