@@ -241,15 +241,13 @@ export const actions = {
       }
 
       const isRelayerUpdated = () => {
-        const relayerVersion = response.data.version
-
-        const { major, patch, prerelease } = parseSemanticVersion(relayerVersion)
-        // Save backwards compatibility with V4 relayers for Ethereum Mainnet
-        const requiredMajor = netId === 1 ? '4' : '5'
-        const isUpdatedMajor = major === requiredMajor
-
+        const { major, minor, patch, prerelease } = parseSemanticVersion(response.data.version)
         if (prerelease) return false
-        return isUpdatedMajor && (Number(patch) >= 5 || netId !== 1) // Patch checking - also backwards compatibility for Mainnet
+        if (netId === 56) {
+          return major === '5' && (Number(minor) > 2 || (minor === '2' && Number(patch) >= 3))
+        }
+        if (netId !== 1) return major === '5'
+        return major === '4' && (Number(minor) > 1 || (minor === '1' && Number(patch) >= 7))
       }
 
       if (!isRelayerUpdated()) {
@@ -291,6 +289,7 @@ export const actions = {
       requests.push(dispatch('observeRelayer', { relayer: registeredRelayer }))
     }
     let statuses = await Promise.all(requests)
+    if (netId !== rootGetters['metamask/netId']) return
 
     // Filter out invalid and duplicate relayers
     statuses = Object.values(
@@ -325,6 +324,7 @@ export const actions = {
         tornadoServiceFee
       })
     } catch {
+      if (netId === 1 || netId === 56) commit('SET_SELECTED_RELAYER', state().selectedRelayer)
       console.error('Method pickRandomRelayer has not picked relayer')
       dispatch(
         'notice/addNotice',

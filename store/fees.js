@@ -17,9 +17,10 @@ export const getters = {
     const { gasPrices } = rootGetters['metamask/networkConfig']
 
     // Return old oracle for backwards compatibility, if chain is ETH Mainnet
-    return netId === 1
-      ? new TornadoFeeOracleV4(netId, rpcUrl, gasPrices)
-      : new TornadoFeeOracleV5(netId, rpcUrl, gasPrices)
+    const FeeOracle = netId === 1 ? TornadoFeeOracleV4 : TornadoFeeOracleV5
+    const oracle = new FeeOracle(netId, rpcUrl, gasPrices)
+    if (netId === 1 || netId === 56) oracle.oracle.eip1559.configuration.minPriority = 0.3 // gwei
+    return oracle
   },
   getGasPriceParams: (state) => {
     return state.gasPriceParams
