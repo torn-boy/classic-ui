@@ -83,7 +83,7 @@ test('Sepolia continues accepting a stable 5.x relayer', async () => {
   expect(result.isValid).toBe(true)
 })
 
-function makeQuoteStore(tip) {
+function makeQuoteStore(tip, netId = 1) {
   const priority = parseUnits(tip, 'gwei').toHexString()
   const results = {
     eth_getBlockByNumber: { baseFeePerGas: parseUnits('2', 'gwei').toHexString() },
@@ -94,27 +94,34 @@ function makeQuoteStore(tip) {
     if (!(method in results)) throw new Error('Unexpected RPC method ' + method)
     return Promise.resolve({ data: { result: results[method] } })
   })
-  const store = makeStore()
+  const store = makeStore(netId)
   store.commit('relayer/SET_SELECTED_RELAYER', { name: 'test-relayer', tornadoServiceFee: 0.4 })
   return store
 }
 
 test.each([
-  ['0.1', '2.3', '5'],
-  ['10', '12', '12']
+  [1, '0.1', '0.3', '2.3'],
+  [1, '10', '10', '12'],
+  [56, '0.1', '0.33', '2.53'],
+  [56, '1', '1.1', '3.3'],
+  [137, '0.01', '0.065', '2.665']
 ])(
-  'a %s gwei tip gives the relayer and wallet their respective gas prices',
-  async (tip, relayPrice, walletPrice) => {
-    const store = makeQuoteStore(tip)
+  'network %s quotes a %s gwei tip through the shared wallet and withdrawal oracle',
+  async (netId, tip, expectedPriority, expectedGasPrice) => {
+    const store = makeQuoteStore(tip, netId)
+    const currency = store.getters['metamask/nativeCurrency']
+    store.commit('application/SET_SELECTED_STATISTIC', { currency, amount: 1 })
+    const oracle = store.getters['fees/oracle']
+    const params = await oracle.getGasPriceParams()
+    expect(BigInt(params.maxPriorityFeePerGas)).toBe(parseUnits(expectedPriority, 'gwei').toBigInt())
+    store.commit('fees/SAVE_GAS_PARAMS', params)
+    expect(Number(store.getters['fees/gasPriceInGwei'])).toBe(Number(expectedGasPrice))
     await store.dispatch('fees/calculateWithdrawalFeeViaRelayer', {})
-    const networkFee = parseUnits(relayPrice, 'gwei').mul(550000)
+    const gasLimit = await oracle.getGasLimit(undefined, 'user_withdrawal')
+    const networkFee = parseUnits(expectedGasPrice, 'gwei').mul(gasLimit)
     expect(store.state.fees.withdrawalNetworkFee.toString()).toBe(networkFee.toString())
     expect(store.state.fees.withdrawalFeeViaRelayer.toString()).toBe(
-      networkFee.add(parseUnits('0.0004', 18)).toString()
-    )
-    expect(Number(store.getters['fees/relayerGasPriceInGwei'])).toBe(Number(relayPrice))
-    expect(BigInt(await store.getters['fees/oracle'].getGasPrice())).toBe(
-      parseUnits(walletPrice, 'gwei').toBigInt()
+      networkFee.add(parseUnits('0.004', 18)).toString()
     )
   }
 )
@@ -123,14 +130,14 @@ test.each([
   ['dai', 100, 18, '0.0005', 55000],
   ['wbtc', 1, 8, '30', 85000]
 ])(
-  '%s keeps its original ETH recommendation and token conversion',
+  '%s calculates the ETH recommendation and token conversion using the shared gas quote',
   async (currency, amount, decimals, price, tokenGas) => {
     const store = makeQuoteStore('0.1')
     store.commit('application/SET_SELECTED_STATISTIC', { currency, amount })
     const weiPerToken = parseUnits(price, 18)
     store.state.price.prices[currency] = weiPerToken.toString()
     await store.dispatch('fees/calculateWithdrawalFeeViaRelayer', {})
-    const refund = parseUnits('5', 'gwei').mul(2 * tokenGas)
+    const refund = parseUnits('2.3', 'gwei').mul(2 * tokenGas)
     expect(BigInt(store.state.application.ethToReceive)).toBe(refund.toBigInt())
     const networkFee = parseUnits('2.3', 'gwei').mul(550000)
     const gasAndRefundInToken = networkFee
