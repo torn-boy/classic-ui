@@ -243,6 +243,9 @@ export const actions = {
       const isRelayerUpdated = () => {
         const { major, minor, patch, prerelease } = parseSemanticVersion(response.data.version)
         if (prerelease) return false
+        if (netId === 56) {
+          return major === '5' && (Number(minor) > 2 || (minor === '2' && Number(patch) >= 3))
+        }
         if (netId !== 1) return major === '5'
         return major === '4' && (Number(minor) > 1 || (minor === '1' && Number(patch) >= 7))
       }
@@ -321,7 +324,7 @@ export const actions = {
         tornadoServiceFee
       })
     } catch {
-      if (netId === 1) commit('SET_SELECTED_RELAYER', state().selectedRelayer)
+      if (netId === 1 || netId === 56) commit('SET_SELECTED_RELAYER', state().selectedRelayer)
       console.error('Method pickRandomRelayer has not picked relayer')
       dispatch(
         'notice/addNotice',

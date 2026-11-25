@@ -24,8 +24,9 @@ afterEach(() => jest.restoreAllMocks())
 
 function makeStore(netId = 1) {
   const config = networkConfig[`netId${netId}`]
+  const rpcSettings = { rpc: { url: 'http://rpc.invalid' } }
   const store = new Vuex.Store({
-    state: { settings: { [`netId${netId}`]: { rpc: { url: 'http://rpc.invalid' } } }, price: { prices: {} } },
+    state: { settings: { netId1: rpcSettings, [`netId${netId}`]: rpcSettings }, price: { prices: {} } },
     getters: {
       'metamask/netId': () => netId,
       'metamask/networkConfig': () => config,
@@ -43,21 +44,25 @@ function makeStore(netId = 1) {
 }
 
 function status(version, netId = 1) {
+  const { nativeCurrency, tokens } = networkConfig[`netId${netId}`]
   return {
     version,
     netId,
     currentQueue: 0,
     tornadoServiceFee: 0.4,
     rewardAccount: '0x0000000000000000000000000000000000000001',
-    instances: { eth: networkConfig.netId1.tokens.eth },
+    instances: { [nativeCurrency]: tokens[nativeCurrency] },
     ethPrices: { dai: '1', cdai: '1', usdc: '1', usdt: '1', torn: '1', wbtc: '1' },
     health: { status: 'true' }
   }
 }
 
-test('mainnet lists only compatible stable v4 relayers and clears a selection that becomes outdated', async () => {
-  const store = makeStore()
-  const versions = ['4.0.99', '4.1.6', '4.1.7', '4.1.10', '4.2.0', '4.2.0-rc.1', '5.0.0']
+test.each([
+  [1, '4.1.6', ['4.1.7', '4.1.10', '4.2.0'], ['4.0.99', '4.2.0-rc.1', '5.0.0']],
+  [56, '5.2.2', ['5.2.3', '5.2.10', '5.3.0'], ['5.1.99', '5.3.0-rc.1', '4.1.7', '6.0.0']]
+])('network %i filters relayers and clears outdated selections', async (netId, old, valid, invalid) => {
+  const store = makeStore(netId)
+  const versions = [old, ...valid, ...invalid]
   const registered = versions.map((version, i) => ({
     hostname: `r${i}.invalid`,
     ensName: version,
@@ -66,12 +71,12 @@ test('mainnet lists only compatible stable v4 relayers and clears a selection th
   relayerRegisterService.mockReturnValue({ getRelayers: jest.fn().mockResolvedValue(registered) })
   axios.get.mockImplementation((url) => {
     const endpoint = registered.find((r) => r.hostname === new URL(url).hostname)
-    return Promise.resolve({ data: status(endpoint.ensName) })
+    return Promise.resolve({ data: status(endpoint.ensName, netId) })
   })
   await store.dispatch('relayer/pickRandomRelayer')
-  expect(store.state.relayer.validRelayers.map((r) => r.name).sort()).toEqual(['4.1.10', '4.1.7', '4.2.0'])
-  expect(store.state.relayer.selectedRelayer.name).toBeTruthy()
-  axios.get.mockResolvedValue({ data: status('4.1.6') })
+  expect(store.state.relayer.validRelayers.map((r) => r.name).sort()).toEqual([...valid].sort())
+  expect(valid).toContain(store.state.relayer.selectedRelayer.name)
+  axios.get.mockResolvedValue({ data: status(old, netId) })
   await store.dispatch('relayer/pickRandomRelayer')
   expect(store.state.relayer.validRelayers).toEqual([])
   expect(store.state.relayer.selectedRelayer.name).toBeFalsy()
